@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import Link from 'next/link';
 import { LoginForm } from '@/components/auth/LoginForm';
 import { Navigation } from '@/components/layout/Navigation';
 
@@ -22,6 +23,15 @@ export default function LoginPage() {
             </p>
           </div>
           <LoginForm />
+          <p className="mt-6 text-center text-sm text-neutral-500">
+            New to CivicChain?{' '}
+            <Link
+              href="/register"
+              className="font-medium text-brand-600 dark:text-brand-400 hover:underline"
+            >
+              Create an account
+            </Link>
+          </p>
         </div>
       </div>
     </div>
