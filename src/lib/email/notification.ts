@@ -5,11 +5,12 @@ import { currentLogger } from '@/lib/server/requestContext';
  * CivicChain outbound notification email (Phase 13).
  *
  * Reuses the same honest policy as the magic-link sender (src/lib/email/magic-link.ts):
- *   - When `EMAIL_SERVER` (SMTP) is configured, a real notification email is sent.
- *   - In local development without SMTP, the email is rendered to the server
+ *   - Resend HTTP API (`RESEND_API_KEY`) first — works on Vercel/serverless.
+ *   - Then SMTP (`EMAIL_SERVER`) via nodemailer.
+ *   - In local development without either, the email is rendered to the server
  *     console so the flow can be verified, but delivery is never claimed.
- *   - In production without SMTP, sending FAILS loudly — we never pretend a
- *     notification email was delivered.
+ *   - In production without either, sending reports non-delivery — we never
+ *     pretend a notification email was delivered.
  *
  * Notification emails are an outbound, fire-and-forget side effect: callers
  * must treat a failure here as non-fatal (a failing channel must never corrupt
@@ -43,14 +44,42 @@ function wrapHtml(title: string, bodyParagraphs: string[]): string {
 export async function sendNotificationEmail(
   input: NotificationEmailInput,
 ): Promise<{ delivered: boolean; reason?: string }> {
+  const from = process.env.EMAIL_FROM || 'CivicChain <noreply@civicchain.example>';
+
+  if (process.env.RESEND_API_KEY) {
+    try {
+      const res = await fetch('https://api.resend.com/emails', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${process.env.RESEND_API_KEY}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          from,
+          to: input.to,
+          subject: input.subject,
+          html: input.html ?? wrapHtml(input.subject, [input.text]),
+          text: input.text,
+        }),
+      });
+      if (!res.ok) {
+        return { delivered: false, reason: `Resend delivery failed (${res.status}).` };
+      }
+      return { delivered: true };
+    } catch (error) {
+      currentLogger().error({ err: error, to: input.to, subject: input.subject }, 'notification email delivery failed (resend)');
+      return { delivered: false, reason: 'Email delivery failed.' };
+    }
+  }
+
   const smtpUrl = process.env.EMAIL_SERVER;
 
   if (!smtpUrl) {
-    // No SMTP configured — honest non-delivery.
+    // No provider configured — honest non-delivery.
     if (process.env.NODE_ENV === 'production') {
       return {
         delivered: false,
-        reason: 'EMAIL_SERVER is not configured — the notification email was NOT sent.',
+        reason: 'Neither RESEND_API_KEY nor EMAIL_SERVER is configured — the notification email was NOT sent.',
       };
     }
     // Local dev: log the email so the channel can be inspected/previewed, but
@@ -65,7 +94,7 @@ export async function sendNotificationEmail(
   try {
     const transport = nodemailer.createTransport(smtpUrl);
     await transport.sendMail({
-      from: process.env.EMAIL_FROM || 'CivicChain <noreply@civicchain.example>',
+      from,
       to: input.to,
       subject: input.subject,
       text: input.text,

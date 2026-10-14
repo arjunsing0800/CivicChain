@@ -45,18 +45,21 @@ export function getDevMagicLink(email: string): { url: string } | null {
 /**
  * Email magic-link sender.
  *
- * - When `EMAIL_SERVER` (SMTP) is configured, a real email is sent.
- * - In local development without SMTP, the link is printed to the server
- *   console and stashed for the guarded dev preview endpoint. Authentication
- *   is never faked: the user must still open the real, one-time token URL.
- * - In production without SMTP, sending FAILS loudly — we never pretend a
- *   login email was delivered.
+ * Delivery priority:
+ *   1. Resend HTTP API (`RESEND_API_KEY`) — works on Vercel/serverless where
+ *      outbound SMTP ports are blocked. `from` = EMAIL_FROM.
+ *   2. SMTP (`EMAIL_SERVER`) via nodemailer.
+ *   3. Local dev without either: link is printed to the server console and
+ *      stashed for the guarded dev preview endpoint. Authentication is never
+ *      faked: the user must still open the real, one-time token URL.
+ *   4. Production without either: sending FAILS loudly — we never pretend a
+ *      login email was delivered.
  */
 export async function sendMagicLinkEmail(
   params: EmailProviderSendVerificationRequestParams,
 ): Promise<void> {
   const { identifier, url, provider } = params;
-  const smtpUrl = process.env.EMAIL_SERVER;
+  const from = process.env.EMAIL_FROM || provider.from || 'CivicChain <onboarding@resend.dev>';
 
   const subject = 'Sign in to CivicChain';
   const text =
@@ -71,10 +74,27 @@ export async function sendMagicLinkEmail(
     `<p style="color:#666;font-size:13px">This link expires shortly.</p>` +
     `</div>`;
 
+  if (process.env.RESEND_API_KEY) {
+    const res = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${process.env.RESEND_API_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ from, to: identifier, subject, html, text }),
+    });
+    if (!res.ok) {
+      const detail = await res.text().catch(() => '');
+      throw new Error(`Resend delivery failed (${res.status}). ${detail}`.slice(0, 300));
+    }
+    return;
+  }
+
+  const smtpUrl = process.env.EMAIL_SERVER;
   if (smtpUrl) {
     const transport = nodemailer.createTransport(smtpUrl);
     await transport.sendMail({
-      from: provider.from,
+      from,
       to: identifier,
       subject,
       text,
@@ -86,7 +106,7 @@ export async function sendMagicLinkEmail(
   if (process.env.NODE_ENV === 'production') {
     // Do NOT fake delivery in production.
     throw new Error(
-      'EMAIL_SERVER is not configured — the magic link email was NOT sent. Configure SMTP for email sign-in.',
+      'Neither RESEND_API_KEY nor EMAIL_SERVER is configured — the magic link email was NOT sent. Set RESEND_API_KEY (recommended on Vercel) or SMTP via EMAIL_SERVER for email sign-in.',
     );
   }
 
