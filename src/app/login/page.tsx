@@ -6,7 +6,7 @@ import { ShieldCheck, LockKeyhole } from 'lucide-react';
 
 export const metadata: Metadata = {
   title: 'Sign In',
-  description: 'Sign in to CivicChain with your email.',
+  description: 'Sign in to CivicChain with Google.',
 };
 
 export default function LoginPage() {
@@ -31,7 +31,7 @@ export default function LoginPage() {
               Welcome back to CivicChain
             </h1>
             <p className="text-neutral-600 dark:text-neutral-400">
-              Passwordless access via a secure magic link sent to your email.
+              Secure sign-in with your Google account.
             </p>
           </div>
           <LoginForm />

@@ -31,8 +31,7 @@ export default function RegisterPage() {
               Create your CivicChain account
             </h1>
             <p className="text-neutral-600 dark:text-neutral-400">
-              Passwordless. Choose an account type — a magic link is sent to
-              your email to finish signing up.
+              Choose an account type, then finish signing up with Google.
             </p>
           </div>
           <LoginForm mode="register" />

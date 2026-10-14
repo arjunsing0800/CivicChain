@@ -136,9 +136,24 @@ async function handleRequest(request: NextRequest) {
     }
   }
 
+  // Auth.js v5 session cookie (verified against the installed
+  // @auth/core cookie behavior in lib/utils/cookie.js): the name is
+  // `__Secure-authjs.session-token` when the secure flag is set (production
+  // HTTPS, see cookies.sessionToken in auth.config.ts) and
+  // `authjs.session-token` for local HTTP. getToken() defaults to the
+  // non-secure name, so without explicit cookieName/salt the proxy never
+  // finds the production cookie and every authenticated page bounces to
+  // /login (the Google session redirect loop).
+  const isProduction = process.env.NODE_ENV === 'production';
+  const sessionCookieName = isProduction
+    ? '__Secure-authjs.session-token'
+    : 'authjs.session-token';
   const token = await getToken({
     req: request,
     secret: process.env.AUTH_SECRET,
+    secureCookie: isProduction,
+    cookieName: sessionCookieName,
+    salt: sessionCookieName,
   });
 
   const api = pathname.startsWith('/api/');

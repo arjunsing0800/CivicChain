@@ -12,8 +12,9 @@ import { RoleApprovalStatus, UserRole } from '../../../../../generated/prisma/cl
  * ADMIN must later approve it (see the admin users panel). Pure CITIZEN
  * signup needs no approval.
  *
- * The magic-link sign-in (EmailProvider) subsequently finds this pre-created
- * user via PrismaAdapter and does not overwrite the recorded role request.
+ * The Google sign-in subsequently finds this pre-created user via the
+ * PrismaAdapter (email linking) and does not overwrite the recorded role
+ * request.
  */
 export async function POST(request: NextRequest) {
   try {

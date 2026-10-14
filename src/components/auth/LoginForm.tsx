@@ -1,13 +1,13 @@
 'use client';
 
 import { useState } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useSearchParams } from 'next/navigation';
 import { signIn } from 'next-auth/react';
 import { motion, useReducedMotion } from 'framer-motion';
 import { Card, CardContent } from '@/components/ui/Card';
 import { Input } from '@/components/ui/Input';
 import { Button } from '@/components/ui/Button';
-import { AlertCircle, Check, Mail, CheckCircle2, ShieldCheck, User, Building2, Landmark, ArrowRight } from 'lucide-react';
+import { AlertCircle, Check, Mail, ShieldCheck, User, Building2 } from 'lucide-react';
 
 const GoogleIcon = () => (
   <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -36,7 +36,6 @@ const ROLE_OPTIONS = [
 ] as const;
 
 export function LoginForm({ mode = 'login' }: { mode?: 'login' | 'register' }) {
-  const router = useRouter();
   const searchParams = useSearchParams();
   const callbackUrl = searchParams.get('callbackUrl') || '/dashboard';
   // Auth.js OAuth failures redirect to /login?error=... — surface them instead
@@ -47,23 +46,20 @@ export function LoginForm({ mode = 'login' }: { mode?: 'login' | 'register' }) {
     Configuration:
       'Sign-in is misconfigured (missing secret or OAuth credentials). Please contact support.',
     AccessDenied: 'Access denied for this account. Please contact support.',
-    Verification: 'This sign-in link is expired or already used. Request a new one.',
     OAuthSignin: 'Could not start Google sign-in. Please try again.',
     OAuthCallback:
       'Google sign-in failed during callback (often: missing AUTH_SECRET, unmigrated database, or redirect-URI mismatch). Please try again.',
     OAuthCreateAccount: 'Could not create your account with Google. Please try again.',
-    EmailCreateAccount: 'Could not create your account. Please try again.',
     Callback: 'Sign-in callback failed. Please try again.',
     OAuthAccountNotLinked:
       'This email already exists with another sign-in method. Sign in with the original method first.',
-    EmailSignin: 'Could not send the magic link. Please try again.',
-    CredentialsSignin: 'Sign-in failed. Please try again.',
     SessionRequired: 'You must be signed in to view that page.',
   };
+  // Email is only collected on /register when a privileged role is requested:
+  // the request is recorded via /api/auth/register BEFORE the Google sign-in,
+  // and the Google account links to that pre-created row by email.
   const [email, setEmail] = useState('');
   const [role, setRole] = useState<string>('CITIZEN');
-  const [sent, setSent] = useState(false);
-  const [devLink, setDevLink] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(
     authError ? (AUTH_ERROR_MESSAGES[authError] ?? `Sign-in failed (${authError}). Please try again.`) : null,
   );
@@ -74,18 +70,16 @@ export function LoginForm({ mode = 'login' }: { mode?: 'login' | 'register' }) {
     ? undefined
     : { initial: { opacity: 0, y: 12, scale: 0.99 }, animate: { opacity: 1, y: 0, scale: 1 } };
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleRegisterContinue = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     setError(null);
-    setDevLink(null);
-
-    const normalized = email.trim().toLowerCase();
 
     try {
-      // Self-service signup: record an ADMIN-gated role request BEFORE the
-      // magic-link sign-in so the account is created with roleStatus=PENDING.
-      if (mode === 'register' && role !== 'CITIZEN') {
+      // Record an ADMIN-gated role request BEFORE the Google sign-in so the
+      // account is created with roleStatus=PENDING.
+      if (role !== 'CITIZEN') {
+        const normalized = email.trim().toLowerCase();
         const reg = await fetch('/api/auth/register', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -99,104 +93,12 @@ export function LoginForm({ mode = 'login' }: { mode?: 'login' | 'register' }) {
         }
       }
 
-      const result = await signIn('email', {
-        email: normalized,
-        redirect: false,
-        callbackUrl,
-      });
-      if (result?.error) {
-        setError(result.error);
-        setLoading(false);
-        return;
-      }
-      setSent(true);
-      setLoading(false);
-
-      // Development convenience: surface the magic link when SMTP is absent.
-      if (process.env.NODE_ENV !== 'production') {
-        const res = await fetch(`/api/auth/dev/magic-link?email=${encodeURIComponent(normalized)}`);
-        if (res.ok) {
-          const body = (await res.json()) as { url: string };
-          setDevLink(body.url);
-        }
-      }
+      await signIn('google', { callbackUrl });
     } catch {
       setError('Something went wrong. Please try again.');
       setLoading(false);
     }
   };
-
-  if (sent) {
-    return (
-      <motion.div {...enter} transition={{ duration: 0.4, ease: 'easeOut' }}>
-        <Card className="overflow-hidden border border-neutral-200 dark:border-dark-border shadow-xl">
-          <div className="h-1.5 w-full bg-gradient-to-r from-brand-600 via-accent-400 to-emerald-500" />
-          <CardContent className="p-8 text-center">
-            <div className="w-16 h-16 rounded-full bg-emerald-100 dark:bg-emerald-900/30 flex items-center justify-center mx-auto mb-4">
-              <CheckCircle2 className="w-8 h-8 text-emerald-600 dark:text-emerald-400" />
-            </div>
-            <h2 className="font-display text-xl font-semibold text-neutral-900 dark:text-white mb-2">
-              Check your inbox
-            </h2>
-            <p className="text-sm text-neutral-600 dark:text-neutral-400 mb-1">
-              A {mode === 'register' ? 'verification' : 'sign-in'} link was sent to{' '}
-              <span className="font-medium text-neutral-900 dark:text-white">{email}</span>.
-            </p>
-            <p className="text-xs text-neutral-500">
-              The link expires shortly. {mode === 'register' ? 'First sign-in creates your account automatically.' : 'No account? One is created automatically on first sign-in.'}
-            </p>
-
-            {mode === 'register' && role !== 'CITIZEN' && (
-              <div className="mt-4 p-4 rounded-xl bg-amber-50 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-900/40 text-left">
-                <p className="text-xs font-semibold text-amber-700 dark:text-amber-300 mb-1 flex items-center gap-1.5">
-                  <ShieldCheck className="w-3.5 h-3.5" />
-                  Role request submitted for approval
-                </p>
-                <p className="text-xs text-neutral-600 dark:text-neutral-300">
-                  You can sign in as a citizen now. Your requested &quot;
-                  {ROLE_OPTIONS.find((o) => o.value === role)?.label}&quot; role is
-                  pending review by an administrator.
-                </p>
-              </div>
-            )}
-
-            {devLink && (
-              <div className="mt-6 p-4 rounded-xl bg-brand-50 dark:bg-brand-900/20 border border-brand-200 dark:border-brand-800 text-left">
-                <p className="text-xs font-semibold text-brand-700 dark:text-brand-300 mb-1 flex items-center gap-1.5">
-                  <ShieldCheck className="w-3.5 h-3.5" />
-                  Development preview (no SMTP configured)
-                </p>
-                <p className="text-xs text-neutral-600 dark:text-neutral-400 mb-2">
-                  Open the real one-time token link directly:
-                </p>
-                <a
-                  href={devLink}
-                  className="text-xs font-mono text-brand-600 dark:text-brand-400 break-all underline"
-                >
-                  {devLink}
-                </a>
-              </div>
-            )}
-
-            <div className="mt-6 flex gap-3">
-              <Button variant="secondary" className="flex-1" onClick={() => router.push('/')}>
-                Back to Home
-              </Button>
-              <Button
-                className="flex-1"
-                onClick={() => {
-                  setSent(false);
-                  setEmail('');
-                }}
-              >
-                Send Again
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-      </motion.div>
-    );
-  }
 
   return (
     <motion.div {...enter} transition={{ duration: 0.4, ease: 'easeOut' }}>
@@ -214,37 +116,50 @@ export function LoginForm({ mode = 'login' }: { mode?: 'login' | 'register' }) {
                 </h2>
                 <p className="text-xs text-neutral-500 dark:text-neutral-400">
                   {mode === 'register'
-                    ? 'Create your CivicChain account.'
-                    : 'Sign in to your CivicChain account.'}
+                    ? 'Create your CivicChain account with Google.'
+                    : 'Sign in with your Google account.'}
                 </p>
               </div>
             </div>
             <div className="h-px bg-neutral-100 dark:bg-dark-border" />
           </div>
 
-          <form onSubmit={handleSubmit} className="space-y-5">
-            <Input
-              id="login-email"
-              label="Email address"
-              type="email"
-              autoComplete="email"
-              required
-              placeholder="you@example.com"
-              helperText="A secure one-time link is sent to this address — no password needed."
-              leftIcon={<Mail className="w-4 h-4" />}
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-            />
-            {error && (
-              <div
-                role="alert"
-                className="flex items-start gap-2.5 rounded-lg border border-red-200 dark:border-red-900/50 bg-red-50 dark:bg-red-950/30 px-3.5 py-2.5 text-sm text-red-700 dark:text-red-300"
+          {mode === 'login' ? (
+            <div className="space-y-5">
+              {error && (
+                <div
+                  role="alert"
+                  className="flex items-start gap-2.5 rounded-lg border border-red-200 dark:border-red-900/50 bg-red-50 dark:bg-red-950/30 px-3.5 py-2.5 text-sm text-red-700 dark:text-red-300"
+                >
+                  <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+                  <p>{error}</p>
+                </div>
+              )}
+              <Button
+                type="button"
+                variant="secondary"
+                size="lg"
+                fullWidth
+                onClick={() => signIn('google', { callbackUrl })}
               >
-                <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
-                <p>{error}</p>
-              </div>
-            )}
-            {mode === 'register' && (
+                <GoogleIcon />
+                <span className="ml-2">Sign in with Google</span>
+              </Button>
+              <p className="text-center text-[11px] leading-relaxed text-neutral-400 dark:text-neutral-500">
+                Secure sign-in with Google. CivicChain never asks for or stores your password.
+              </p>
+            </div>
+          ) : (
+            <form onSubmit={handleRegisterContinue} className="space-y-5">
+              {error && (
+                <div
+                  role="alert"
+                  className="flex items-start gap-2.5 rounded-lg border border-red-200 dark:border-red-900/50 bg-red-50 dark:bg-red-950/30 px-3.5 py-2.5 text-sm text-red-700 dark:text-red-300"
+                >
+                  <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+                  <p>{error}</p>
+                </div>
+              )}
               <fieldset>
                 <legend className="text-sm font-medium text-neutral-800 dark:text-neutral-200 mb-2">
                   Account type
@@ -305,37 +220,47 @@ export function LoginForm({ mode = 'login' }: { mode?: 'login' | 'register' }) {
                   administrator approves your request.
                 </p>
               </fieldset>
-            )}
-            <Button type="submit" size="lg" fullWidth loading={loading}>
-              {loading
-                ? 'Sending link…'
-                : mode === 'register'
-                  ? 'Create my account — send magic link'
-                  : 'Send Magic Link'}
-              {!loading && <ArrowRight className="h-4 w-4" />}
-            </Button>
-            <div className="relative my-4">
-              <div className="absolute inset-0 flex items-center">
-                <div className="w-full border-t border-neutral-200 dark:border-dark-border" />
-              </div>
-              <div className="relative flex justify-center text-xs uppercase">
-                <span className="bg-white dark:bg-dark-bg-card px-2 text-neutral-400 dark:text-neutral-500">or continue with</span>
-              </div>
-            </div>
-            <Button
-              type="button"
-              variant="secondary"
-              size="lg"
-              fullWidth
-              onClick={() => signIn('google', { callbackUrl })}
-            >
-              <GoogleIcon />
-              <span className="ml-2">Sign in with Google</span>
-            </Button>
-            <p className="text-center text-[11px] leading-relaxed text-neutral-400 dark:text-neutral-500">
-              Protected by magic-link authentication. CivicChain never asks for or stores your password.
-            </p>
-          </form>
+              {role !== 'CITIZEN' && (
+                <Input
+                  id="register-email"
+                  label="Email address"
+                  type="email"
+                  autoComplete="email"
+                  required
+                  placeholder="you@example.com"
+                  helperText="Must match the Google account you will sign in with — your role request is recorded under this address."
+                  leftIcon={<Mail className="w-4 h-4" />}
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                />
+              )}
+              <Button type="submit" size="lg" fullWidth loading={loading}>
+                <GoogleIcon />
+                <span className="ml-2">
+                  {loading
+                    ? 'Continuing…'
+                    : role !== 'CITIZEN'
+                      ? 'Submit request — continue with Google'
+                      : 'Continue with Google'}
+                </span>
+              </Button>
+              {role !== 'CITIZEN' && (
+                <div className="p-4 rounded-xl bg-amber-50 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-900/40 text-left">
+                  <p className="text-xs font-semibold text-amber-700 dark:text-amber-300 mb-1 flex items-center gap-1.5">
+                    <ShieldCheck className="w-3.5 h-3.5" />
+                    Approval required
+                  </p>
+                  <p className="text-xs text-neutral-600 dark:text-neutral-300">
+                    You will sign in as a citizen now. Your requested role stays
+                    pending until an administrator approves it.
+                  </p>
+                </div>
+              )}
+              <p className="text-center text-[11px] leading-relaxed text-neutral-400 dark:text-neutral-500">
+                Secure sign-in with Google. CivicChain never asks for or stores your password.
+              </p>
+            </form>
+          )}
         </CardContent>
       </Card>
     </motion.div>
