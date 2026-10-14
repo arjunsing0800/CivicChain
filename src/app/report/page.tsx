@@ -192,6 +192,41 @@ export default function ReportPage() {
                         setPicked(next);
                       }}
                     />
+                    {/* Latitude/longitude fields: auto-filled when the user
+                        clicks the map / uses geolocation, still editable by
+                        hand for manual coordinates. */}
+                    <div className="mt-3 grid grid-cols-2 gap-3">
+                      <Input
+                        label="Latitude"
+                        type="number"
+                        step="any"
+                        placeholder="28.98"
+                        value={picked.latitude != null ? String(picked.latitude) : ''}
+                        onChange={(e) => {
+                          const v = e.target.value === '' ? null : Number(e.target.value);
+                          setPicked((p) => ({
+                            ...p,
+                            latitude: v != null && Number.isFinite(v) ? v : null,
+                            hasPin: v != null && Number.isFinite(v) ? p.hasPin || p.longitude != null : p.hasPin,
+                          }));
+                        }}
+                      />
+                      <Input
+                        label="Longitude"
+                        type="number"
+                        step="any"
+                        placeholder="77.70"
+                        value={picked.longitude != null ? String(picked.longitude) : ''}
+                        onChange={(e) => {
+                          const v = e.target.value === '' ? null : Number(e.target.value);
+                          setPicked((p) => ({
+                            ...p,
+                            longitude: v != null && Number.isFinite(v) ? v : null,
+                            hasPin: v != null && Number.isFinite(v) ? p.hasPin || p.latitude != null : p.hasPin,
+                          }));
+                        }}
+                      />
+                    </div>
                     <p className="mt-1 text-xs text-neutral-500">
                       Search for an address, click the map, or use your device&apos;s location. When available, the address is resolved and the ward detected server-side.
                     </p>

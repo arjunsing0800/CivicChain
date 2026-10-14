@@ -1,36 +1,24 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 import Link from 'next/link';
-import { ArrowRight, Map as MapIcon, Box } from 'lucide-react';
+import { ArrowRight, Map as MapIcon, Globe } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
 import { CommandMap, type CommandMapPoint } from '@/components/command/CommandMap';
-import { CommandCenterScene } from '@/components/three/CommandCenterScene';
 import { cn } from '@/lib/utils';
 
 /**
- * Command Intelligence Panel — hybrid 2D/3D geographic intelligence for the
- * Command Center. Users toggle between practical 2D mapping (Leaflet) and
- * spatial 3D visualization (Three.js).
+ * Command Intelligence Panel — 2D live incident map plus a reserved 3D tab.
  *
- * The 3D view provides spatial understanding of issue concentration and severity
- * that 2D maps cannot convey. The 2D view provides geographic precision.
+ * The 3D Earth Map visualization lives here as a named placeholder until the
+ * externally-built 3D view is integrated; the live satellite Leaflet map
+ * below it is the operational view and stays fully functional.
  */
 
 interface IntelligencePanelProps {
   mapPoints: CommandMapPoint[];
   selectedId: string | null;
   onSelectIssue: (id: string | null) => void;
-  mapContext: {
-    points: Array<{
-      id: string;
-      lat: number;
-      lng: number;
-      attentionLevel: 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW';
-      severity: string | null;
-    }>;
-    center: { lat: number; lng: number } | null;
-  };
 }
 
 type ViewMode = '2d' | '3d';
@@ -39,20 +27,8 @@ export function CommandIntelligencePanel({
   mapPoints,
   selectedId,
   onSelectIssue,
-  mapContext,
 }: IntelligencePanelProps) {
   const [viewMode, setViewMode] = useState<ViewMode>('2d');
-
-  const scenePoints = useMemo(() =>
-    mapContext.points.map((p) => ({
-      id: p.id,
-      lat: p.lat,
-      lng: p.lng,
-      severity: p.severity as 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL' | null,
-      attentionLevel: p.attentionLevel,
-    })),
-    [mapContext.points],
-  );
 
   return (
     <Card variant="elevated" className="bg-white dark:bg-dark-bg-card border border-neutral-200/80 dark:border-dark-border/80 overflow-hidden">
@@ -60,15 +36,15 @@ export function CommandIntelligencePanel({
         <div>
           <CardTitle as="h2" className="text-sm font-semibold uppercase tracking-wider text-neutral-500 dark:text-neutral-400 flex items-center gap-2">
             {viewMode === '3d' ? (
-              <Box className="w-4 h-4 text-violet-500" />
+              <Globe className="w-4 h-4 text-violet-500" />
             ) : (
               <MapIcon className="w-4 h-4 text-brand-500" />
             )}
-            {viewMode === '3d' ? 'Spatial Intelligence' : 'Live Incident Command Map'}
+            {viewMode === '3d' ? '3D Earth Map' : 'Live Incident Command Map'}
           </CardTitle>
           <p className="text-xs text-neutral-400 dark:text-neutral-500 mt-1">
             {viewMode === '3d'
-              ? '3D visualization of geographic issue concentration and severity'
+              ? 'Interactive 3D earth view appears here — live satellite map below'
               : 'Real-time civic activity and incident intelligence'}
           </p>
         </div>
@@ -97,7 +73,7 @@ export function CommandIntelligencePanel({
                   : 'text-neutral-500 hover:text-neutral-700 dark:hover:text-neutral-300',
               )}
             >
-              <Box className="w-3.5 h-3.5 inline mr-1" />
+              <Globe className="w-3.5 h-3.5 inline mr-1" />
               3D
             </button>
           </div>
@@ -107,21 +83,40 @@ export function CommandIntelligencePanel({
         </div>
       </CardHeader>
       <CardContent className="p-0">
-        <div className="relative h-[350px] md:h-[450px]">
-          {viewMode === '2d' ? (
+        {viewMode === '2d' ? (
+          <div className="relative h-[350px] md:h-[450px]">
             <CommandMap
               points={mapPoints}
               selectedId={selectedId}
               onSelect={(id) => onSelectIssue(id || null)}
             />
-          ) : (
-            <CommandCenterScene
-              points={scenePoints}
-              center={mapContext.center}
-              className="w-full h-full"
-            />
-          )}
-        </div>
+          </div>
+        ) : (
+          // 3D Earth Map placeholder (the 3D visualization was removed) with
+          // the live satellite map below — same incidents, shared selection.
+          <div className="grid gap-4 p-4">
+            <div className="relative overflow-hidden rounded-xl border border-dashed border-neutral-300 dark:border-dark-border bg-neutral-50 dark:bg-dark-bg px-6 py-10 text-center">
+              <div className="w-12 h-12 rounded-xl bg-violet-100 dark:bg-violet-900/30 flex items-center justify-center mx-auto mb-3">
+                <Globe className="w-6 h-6 text-violet-500" aria-hidden="true" />
+              </div>
+              <p className="text-sm font-semibold text-neutral-700 dark:text-neutral-200">3D Earth Map</p>
+              <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-1 max-w-sm mx-auto">
+                The interactive 3D earth visualization will appear here. Meanwhile, the live
+                satellite map below shows every located incident.
+              </p>
+            </div>
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-wider text-neutral-500 dark:text-neutral-400 mb-2">
+                Live satellite map — same incidents, synced selection
+              </p>
+              <CommandMap
+                points={mapPoints}
+                selectedId={selectedId}
+                onSelect={(id) => onSelectIssue(id || null)}
+              />
+            </div>
+          </div>
+        )}
       </CardContent>
     </Card>
   );

@@ -373,16 +373,6 @@ export default function AdminCommandCenter() {
               mapPoints={mapPoints}
               selectedId={selectedId}
               onSelectIssue={setSelectedId}
-              mapContext={{
-                points: (op?.mapContext.points ?? []).map((p) => ({
-                  id: p.id,
-                  lat: p.latitude,
-                  lng: p.longitude,
-                  attentionLevel: p.detail.attentionLevel,
-                  severity: p.severity as string | null,
-                })),
-                center: op?.mapContext.center ?? null,
-              }}
             />
           )}
         </motion.div>

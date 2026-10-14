@@ -179,8 +179,8 @@ function RiskScene({ areas, cLat, cLng }: { areas: RiskArea[]; cLat: number; cLn
 export function RiskSurface({ areas, center, className }: RiskSurfaceProps) {
   const { capability, clampedDPR, isVisible } = useWebGL();
 
-  const cLat = center?.lat ?? 27.4924;
-  const cLng = center?.lng ?? 78.0322;
+  const cLat = center?.lat ?? 28.98;
+  const cLng = center?.lng ?? 77.7;
 
   if (areas.length === 0) {
     return (

@@ -17,7 +17,12 @@ import { X } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
 import { cn } from '@/lib/utils';
-import { REGION_CITY } from '@/lib/city';
+import {
+  MEERUT_CENTER_LNGLAT,
+  MEERUT_DEFAULT_ZOOM,
+  addLeafletBasemaps,
+  leafletLocateErrorMessage,
+} from '@/lib/map/basemap';
 import type { CommandMapPoint } from './CommandMap';
 
 /** Global Leaflet instance populated by the UMD build above. */
@@ -80,7 +85,10 @@ export function CommandMapInner({
   const mapRef = useRef<LeafletTypes.Map | null>(null);
   const clusterRef = useRef<MarkerClusterLike | null>(null);
   const markersRef = useRef<Map<string, LeafletTypes.Marker>>(new Map());
+  const locateMarkerRef = useRef<LeafletTypes.Marker | null>(null);
   const [offline, setOffline] = useState(false);
+  const [locating, setLocating] = useState(false);
+  const [locateError, setLocateError] = useState<string | null>(null);
 
   const located = useMemo(
     () =>
@@ -98,13 +106,14 @@ export function CommandMapInner({
 
   const selected = located.find((p) => p.id === selectedId) ?? null;
 
+  // Default view: Meerut (28.98, 77.70) at zoom 14 on satellite-with-labels.
   const center: [number, number] =
     located.length > 0
       ? [
           located.reduce((s, p) => s + p.longitude, 0) / located.length,
           located.reduce((s, p) => s + p.latitude, 0) / located.length,
         ]
-      : REGION_CITY.center;
+      : MEERUT_CENTER_LNGLAT;
 
   // Build the base map once.
   useEffect(() => {
@@ -112,24 +121,16 @@ export function CommandMapInner({
 
     const map = L.map(containerRef.current, {
       center: [center[1], center[0]],
-      zoom: located.length === 1 ? 14 : located.length > 0 ? 10 : 8,
+      zoom: located.length === 1 ? 14 : located.length > 0 ? 10 : MEERUT_DEFAULT_ZOOM,
       zoomControl: false,
       attributionControl: true,
       maxZoom: 19,
     });
     L.control.zoom({ position: 'topright' }).addTo(map);
 
-    const tileLayer = L.tileLayer(
-      'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',
-      {
-        attribution:
-          '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/">CARTO</a>',
-        subdomains: 'abcd',
-        maxZoom: 19,
-      },
-    ).addTo(map);
-
-    tileLayer.on('tileerror', () => setOffline(true));
+    // Free basemaps: Satellite (with labels) default; Satellite + Street (OSM)
+    // switchable from the layer control.
+    addLeafletBasemaps(L as never, map as never, () => setOffline(true));
     map.on('error', () => setOffline(true));
 
     const cluster = ClusterGroupL.markerClusterGroup({
@@ -160,6 +161,8 @@ export function CommandMapInner({
 
     return () => {
       markersRef.current.clear();
+      locateMarkerRef.current?.remove();
+      locateMarkerRef.current = null;
       cluster.clearLayers?.();
       map.remove();
       mapRef.current = null;
@@ -262,6 +265,44 @@ export function CommandMapInner({
     }
   }, [selectedId, selected, reduce]);
 
+  // "Locate me": fly to the operator's position; permission denial and other
+  // failures become a small banner instead of a silent no-op.
+  const handleLocate = () => {
+    const map = mapRef.current;
+    if (!map) return;
+    if (!('geolocation' in navigator)) {
+      setLocateError('Geolocation is not available in this browser.');
+      return;
+    }
+    setLocating(true);
+    setLocateError(null);
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setLocating(false);
+        const { latitude, longitude } = pos.coords;
+        map.flyTo([latitude, longitude], Math.max(map.getZoom(), 15), {
+          duration: reduce ? 0 : 0.8,
+        });
+        locateMarkerRef.current?.remove();
+        const dot = L.divIcon({
+          html: '<div style="width:16px;height:16px;border-radius:50%;background:#2563eb;border:3px solid #fff;box-shadow:0 1px 6px rgba(0,0,0,0.4)"></div>',
+          className: '',
+          iconSize: L.point(16, 16),
+          iconAnchor: L.point(8, 8),
+        });
+        locateMarkerRef.current = L.marker([latitude, longitude], { icon: dot })
+          .addTo(map)
+          .bindPopup('You are here')
+          .openPopup();
+      },
+      (err) => {
+        setLocating(false);
+        setLocateError(leafletLocateErrorMessage(err.code));
+      },
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 },
+    );
+  };
+
   return (
     <div className="grid lg:grid-cols-[1fr_320px] gap-4">
       <style>{`
@@ -275,10 +316,26 @@ export function CommandMapInner({
         .cmd-popup .leaflet-popup-content{margin:12px 14px}
         .cmd-popup .leaflet-popup-tip{box-shadow:0 2px 6px rgba(0,0,0,0.1)}
         .cmd-popup a:hover{background:#1d4ed8}
+        .leaflet-control-layers{background:rgba(255,255,255,0.95);border-radius:10px;font-size:12px}
       `}</style>
       {/* Map canvas */}
       <div className="relative overflow-hidden rounded-xl border border-neutral-200 dark:border-dark-border bg-neutral-100 dark:bg-dark-bg min-h-[420px]">
         <div ref={containerRef} className="absolute inset-0" role="region" aria-label="Live incident command map" data-testid="cmd-map-canvas" />
+        <button
+          type="button"
+          onClick={handleLocate}
+          disabled={locating}
+          aria-label="Center the map on my location"
+          title="Locate me"
+          className="absolute bottom-4 right-4 z-[500] inline-flex items-center gap-1.5 rounded-full bg-white/95 border border-neutral-200 px-3 py-1.5 text-xs font-medium text-neutral-700 shadow-sm hover:bg-white disabled:opacity-60 dark:bg-dark-bg/95 dark:text-neutral-200 dark:border-dark-border"
+        >
+          {locating ? 'Locating…' : '◎ Locate me'}
+        </button>
+        {locateError && (
+          <div className="absolute inset-x-4 bottom-14 z-[500] p-2.5 rounded-lg bg-white/95 border border-amber-200 text-xs text-amber-800 shadow-sm dark:bg-dark-bg/95 dark:text-amber-200 dark:border-amber-800">
+            {locateError}
+          </div>
+        )}
 
         {located.length === 0 && (
           <div className="absolute inset-0 z-10 flex flex-col items-center justify-center pointer-events-none bg-white/60 dark:bg-dark-bg/60 backdrop-blur-[1px]">

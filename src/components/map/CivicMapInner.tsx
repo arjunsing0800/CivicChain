@@ -15,7 +15,12 @@ import 'leaflet/dist/leaflet.js';
 import 'leaflet.markercluster/dist/leaflet.markercluster.js';
 import 'leaflet.heat/dist/leaflet-heat.js';
 import { STATUS_COLORS } from '@/components/dashboard/mapConstants';
-import { REGION_CITY } from '@/lib/city';
+import {
+  MEERUT_CENTER_LATLNG,
+  MEERUT_DEFAULT_ZOOM,
+  addLeafletBasemaps,
+  leafletLocateErrorMessage,
+} from '@/lib/map/basemap';
 import type { IssueListItem } from '@/lib/issues/types';
 
 /** Global Leaflet instance populated by the UMD builds above. */
@@ -27,6 +32,7 @@ export interface CivicMapPoint {
   id: string;
   publicId: string;
   title: string;
+  categoryLabel: string;
   displayStatus: string;
   latitude: number;
   longitude: number;
@@ -91,6 +97,7 @@ function asPoint(issue: IssueListItem): CivicMapPoint {
     id: issue.id,
     publicId: issue.publicId,
     title: issue.title,
+    categoryLabel: issue.categoryLabel,
     displayStatus: issue.displayStatus,
     latitude: issue.latitude!,
     longitude: issue.longitude!,
@@ -103,6 +110,9 @@ function buildPopup(p: CivicMapPoint, statusLabel?: string): string {
   <div style="font-family:ui-monospace,monospace;font-size:11px;color:#2563eb;margin-bottom:2px">${p.publicId}</div>
   <div style="font-size:13px;font-weight:600;color:#111827;line-height:1.35">${p.title}</div>
   <div style="display:flex;align-items:center;gap:6px;margin-top:5px;font-size:12px;color:#4b5563">
+    <span>📁</span><span>${p.categoryLabel}</span>
+  </div>
+  <div style="display:flex;align-items:center;gap:6px;margin-top:3px;font-size:12px;color:#4b5563">
     <span style="width:8px;height:8px;border-radius:50%;background:${markerColor(p.displayStatus)};flex-shrink:0"></span>
     <span>${statusLabel ?? p.displayStatus}</span>
   </div>
@@ -141,7 +151,10 @@ export function CivicMapInner({
   const pointsRef = useRef<CivicMapPoint[]>([]);
   const lastKeyRef = useRef<string>('');
   const onSelectRef = useRef(onSelectImage);
+  const locateMarkerRef = useRef<LeafletTypes.Marker | null>(null);
   const [offline, setOffline] = useState(false);
+  const [locating, setLocating] = useState(false);
+  const [locateError, setLocateError] = useState<string | null>(null);
 
   useEffect(() => {
     onSelectRef.current = onSelectImage;
@@ -156,14 +169,16 @@ export function CivicMapInner({
   );
 
   const pointsKey = useMemo(
-    () => located.map((p) => `${p.id}:${p.latitude}:${p.longitude}:${p.displayStatus}`).join('|'),
+    () => located.map((p) => `${p.id}:${p.latitude}:${p.longitude}:${p.displayStatus}:${p.categoryLabel}`).join('|'),
     [located],
   );
 
+  // Default view is Meerut (28.98, 77.70) at zoom 14 on satellite-with-labels.
+  // Once located reports arrive, the marker effect below fits the view to them.
   const center: [number, number] =
     located.length > 0
       ? [located.reduce((s, p) => s + p.latitude, 0) / located.length, located.reduce((s, p) => s + p.longitude, 0) / located.length]
-      : [REGION_CITY.center[1], REGION_CITY.center[0]];
+      : [MEERUT_CENTER_LATLNG[0], MEERUT_CENTER_LATLNG[1]];
 
   // Weighted heat data shared between the layer's data-sync and enable effects.
   const heatData = useMemo<Array<[number, number, number]>>(() => {
@@ -181,24 +196,16 @@ export function CivicMapInner({
 
     const map = L.map(containerRef.current, {
       center,
-      zoom: located.length === 1 ? 14 : located.length > 0 ? 12 : 10,
+      zoom: located.length === 1 ? 14 : located.length > 0 ? 12 : MEERUT_DEFAULT_ZOOM,
       zoomControl: false,
       attributionControl: true,
       maxZoom: 19,
     });
     L.control.zoom({ position: 'topright' }).addTo(map);
 
-    const tileLayer = L.tileLayer(
-      'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',
-      {
-        attribution:
-          '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/">CARTO</a>',
-        subdomains: 'abcd',
-        maxZoom: 19,
-      },
-    ).addTo(map);
-
-    tileLayer.on('tileerror', () => setOffline(true));
+    // Free basemaps: Satellite (with labels) is the default; the layer
+    // control offers Satellite without labels + Street (OSM) as alternatives.
+    addLeafletBasemaps(L as never, map as never, () => setOffline(true));
     map.on('error', () => setOffline(true));
 
     const cluster = ClusterGroupL.markerClusterGroup({
@@ -241,6 +248,8 @@ export function CivicMapInner({
 
     return () => {
       markersRef.current.clear();
+      locateMarkerRef.current?.remove();
+      locateMarkerRef.current = null;
       cluster.clearLayers?.();
       map.remove();
       mapRef.current = null;
@@ -362,6 +371,44 @@ export function CivicMapInner({
     onSelectRef.current?.(target.id);
   }, [focusId, reduce]);
 
+  // "Locate me": center on the user's position, with explicit messaging for
+  // denied permission / timeout / unsupported browsers.
+  const handleLocate = () => {
+    const map = mapRef.current;
+    if (!map) return;
+    if (!('geolocation' in navigator)) {
+      setLocateError('Geolocation is not available in this browser.');
+      return;
+    }
+    setLocating(true);
+    setLocateError(null);
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setLocating(false);
+        const { latitude, longitude } = pos.coords;
+        map.flyTo([latitude, longitude], Math.max(map.getZoom(), 15), {
+          duration: reduce ? 0 : 0.9,
+        });
+        locateMarkerRef.current?.remove();
+        const dot = L.divIcon({
+          html: '<div style="width:16px;height:16px;border-radius:50%;background:#2563eb;border:3px solid #fff;box-shadow:0 1px 6px rgba(0,0,0,0.4)"></div>',
+          className: '',
+          iconSize: L.point(16, 16),
+          iconAnchor: L.point(8, 8),
+        });
+        locateMarkerRef.current = L.marker([latitude, longitude], { icon: dot })
+          .addTo(map)
+          .bindPopup('You are here')
+          .openPopup();
+      },
+      (err) => {
+        setLocating(false);
+        setLocateError(leafletLocateErrorMessage(err.code));
+      },
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 },
+    );
+  };
+
   return (
     <div className={className ?? 'relative w-full h-full min-h-[300px]'} role="region" aria-label="Civic issues map">
       <style>{`
@@ -369,8 +416,25 @@ export function CivicMapInner({
         .marker-cluster-civic div{width:100%;height:100%;border-radius:50%}
         .civic-popup .leaflet-popup-content-wrapper{border-radius:10px;box-shadow:0 4px 20px rgba(0,0,0,0.15);padding:0}
         .civic-popup .leaflet-popup-content{margin:12px 14px}
+        .leaflet-control-layers{background:rgba(255,255,255,0.95);border-radius:10px;font-size:12px}
       `}</style>
       <div ref={containerRef} className="absolute inset-0" />
+      {/* Locate-me control */}
+      <button
+        type="button"
+        onClick={handleLocate}
+        disabled={locating}
+        aria-label="Center the map on my location"
+        title="Locate me"
+        className="absolute bottom-4 right-4 z-[500] inline-flex items-center gap-1.5 rounded-full bg-white/95 border border-neutral-200 px-3 py-1.5 text-xs font-medium text-neutral-700 shadow-sm hover:bg-white disabled:opacity-60 dark:bg-dark-bg/95 dark:text-neutral-200 dark:border-dark-border"
+      >
+        {locating ? 'Locating…' : '◎ Locate me'}
+      </button>
+      {locateError && (
+        <div className="absolute inset-x-4 bottom-14 p-2.5 rounded-lg bg-white/95 border border-amber-200 text-xs text-amber-800 shadow-sm dark:bg-dark-bg/95 dark:text-amber-200 dark:border-amber-800">
+          {locateError}
+        </div>
+      )}
       {offline && (
         <div className="absolute inset-x-4 bottom-4 p-3 rounded-lg bg-neutral-900/85 dark:bg-dark-bg/85 border border-neutral-200 dark:border-dark-border text-xs text-white dark:text-neutral-200">
           Map tiles could not be loaded (offline?). Report positions are still laid out by coordinate.

@@ -3,9 +3,9 @@
  * platform operates in. Used by the map components and dashboard map labels so
  * the displayed location is never a hardcoded duplicate string.
  *
- * Coordinates: Mathura, Uttar Pradesh (regional default).
+ * Coordinates: Meerut, Uttar Pradesh (regional default, [lng, lat]).
  */
 export const REGION_CITY = {
-  label: 'Mathura, Uttar Pradesh',
-  center: [78.0322, 27.4924] as [number, number],
+  label: 'Meerut, Uttar Pradesh',
+  center: [77.7, 28.98] as [number, number],
 };

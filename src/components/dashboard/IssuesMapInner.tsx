@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type * as LeafletTypes from 'leaflet';
 // Loading the UMD builds on the client is required: leaflet.markercluster
 // registers itself on the global `L`, so we embed Leaflet's UMD build (which
@@ -12,7 +12,12 @@ import 'leaflet.markercluster/dist/MarkerCluster.Default.css';
 import 'leaflet/dist/leaflet.js';
 import 'leaflet.markercluster/dist/leaflet.markercluster.js';
 import type { IssueListItem } from '@/lib/issues/types';
-import { REGION_CITY } from '@/lib/city';
+import {
+  MEERUT_CENTER_LATLNG,
+  MEERUT_DEFAULT_ZOOM,
+  addLeafletBasemaps,
+  leafletLocateErrorMessage,
+} from '@/lib/map/basemap';
 
 /** Global Leaflet instance populated by the UMD build above. */
 const L = (globalThis as unknown as { L: typeof import('leaflet') }).L;
@@ -137,6 +142,10 @@ export function IssuesMapInner({
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<LeafletTypes.Map | null>(null);
   const clusterRef = useRef<MarkerClusterLike | null>(null);
+  const locateMarkerRef = useRef<LeafletTypes.Marker | null>(null);
+  const [locating, setLocating] = useState(false);
+  const [locateError, setLocateError] = useState<string | null>(null);
+  const [offline, setOffline] = useState(false);
 
   // Build a stable content key so the marker effect only re-runs when actual
   // marker data changes (not just because the parent re-renders with a new
@@ -153,13 +162,14 @@ export function IssuesMapInner({
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
 
+    // Default view: Meerut (28.98, 77.70) at zoom 14 on satellite-with-labels.
     const initialCenter: [number, number] =
       center ??
       (issues.length > 0 && issues[0].latitude && issues[0].longitude
         ? [issues[0].latitude, issues[0].longitude]
-        : [REGION_CITY.center[1], REGION_CITY.center[0]]);
+        : [MEERUT_CENTER_LATLNG[0], MEERUT_CENTER_LATLNG[1]]);
 
-    const initialZoom = zoom ?? (issues.length === 1 ? 14 : issues.length > 0 ? 11 : 10);
+    const initialZoom = zoom ?? (issues.length === 1 ? 14 : issues.length > 0 ? 11 : MEERUT_DEFAULT_ZOOM);
 
     const map = L.map(containerRef.current, {
       center: initialCenter,
@@ -171,15 +181,10 @@ export function IssuesMapInner({
 
     L.control.zoom({ position: 'topright' }).addTo(map);
 
-    L.tileLayer(
-      'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',
-      {
-        attribution:
-          '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/">CARTO</a>',
-        subdomains: 'abcd',
-        maxZoom: 19,
-      },
-    ).addTo(map);
+    // Free basemaps: Satellite (with labels) default; Satellite + Street (OSM)
+    // available from the layer control. "Tiles © Esri" / "© OpenStreetMap".
+    addLeafletBasemaps(L as never, map as never, () => setOffline(true));
+    map.on('error', () => setOffline(true));
 
     const cluster = ClusterGroupL.markerClusterGroup({
       chunkedLoading: true,
@@ -211,6 +216,8 @@ export function IssuesMapInner({
 
     return () => {
       cluster.clearLayers?.();
+      locateMarkerRef.current?.remove();
+      locateMarkerRef.current = null;
       map.remove();
       mapRef.current = null;
       clusterRef.current = null;
@@ -263,6 +270,42 @@ export function IssuesMapInner({
     fitAll(map, issues);
   }, [issuesKey, issues]);
 
+  // "Locate me": center on the user's position; denied permission and other
+  // geolocation failures surface as a dismissible message, never a crash.
+  const handleLocate = () => {
+    const map = mapRef.current;
+    if (!map) return;
+    if (!('geolocation' in navigator)) {
+      setLocateError('Geolocation is not available in this browser.');
+      return;
+    }
+    setLocating(true);
+    setLocateError(null);
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setLocating(false);
+        const { latitude, longitude } = pos.coords;
+        map.flyTo([latitude, longitude], Math.max(map.getZoom(), 15), { duration: 0.9 });
+        locateMarkerRef.current?.remove();
+        const dot = L.divIcon({
+          html: '<div style="width:16px;height:16px;border-radius:50%;background:#2563eb;border:3px solid #fff;box-shadow:0 1px 6px rgba(0,0,0,0.4)"></div>',
+          className: '',
+          iconSize: L.point(16, 16),
+          iconAnchor: L.point(8, 8),
+        });
+        locateMarkerRef.current = L.marker([latitude, longitude], { icon: dot })
+          .addTo(map)
+          .bindPopup('You are here')
+          .openPopup();
+      },
+      (err) => {
+        setLocating(false);
+        setLocateError(leafletLocateErrorMessage(err.code));
+      },
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 },
+    );
+  };
+
   return (
     <div className={className}>
       <style>{`
@@ -276,8 +319,29 @@ export function IssuesMapInner({
         .civic-popup .leaflet-popup-content{margin:12px 14px}
         .civic-popup .leaflet-popup-tip{box-shadow:0 2px 6px rgba(0,0,0,0.1)}
         .civic-popup a:hover{background:#1d4ed8}
+        .leaflet-control-layers{background:rgba(255,255,255,0.95);border-radius:10px;font-size:12px}
       `}</style>
       <div ref={containerRef} style={{ width: '100%', height: '100%', minHeight: 280 }} />
+      <button
+        type="button"
+        onClick={handleLocate}
+        disabled={locating}
+        aria-label="Center the map on my location"
+        title="Locate me"
+        className="absolute bottom-4 right-4 z-[500] inline-flex items-center gap-1.5 rounded-full bg-white/95 border border-neutral-200 px-3 py-1.5 text-xs font-medium text-neutral-700 shadow-sm hover:bg-white disabled:opacity-60"
+      >
+        {locating ? 'Locating…' : '◎ Locate me'}
+      </button>
+      {locateError && (
+        <div className="absolute inset-x-4 bottom-14 p-2.5 rounded-lg bg-white/95 border border-amber-200 text-xs text-amber-800 shadow-sm">
+          {locateError}
+        </div>
+      )}
+      {offline && (
+        <div className="absolute inset-x-4 bottom-4 p-2.5 rounded-lg bg-neutral-900/85 text-xs text-white">
+          Map tiles could not be loaded (offline?). Report positions are still laid out by coordinate.
+        </div>
+      )}
     </div>
   );
 }

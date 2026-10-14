@@ -1,6 +1,12 @@
 import type { StyleSpecification } from 'maplibre-gl';
+import {
+  MAPLIBRE_BASEMAP_STYLES,
+  OSM_STREET_STYLE,
+  SATELLITE_STYLE,
+  SATELLITE_WITH_LABELS_STYLE,
+} from '@/lib/map/basemap';
 
-/** CARTO Voyager raster tile style — shared across all Maplibre map surfaces. */
+/** CARTO Voyager raster tile style — kept for backwards compatibility. */
 export const CARTO_STYLE: StyleSpecification = {
   version: 8,
   sources: {
@@ -17,6 +23,14 @@ export const CARTO_STYLE: StyleSpecification = {
   },
   layers: [{ id: 'carto-voyager', type: 'raster', source: 'carto-voyager' }],
 };
+
+/**
+ * Default MapLibre basemap: Esri satellite + place/boundary labels.
+ * Use `MAPLIBRE_BASEMAP_STYLES[id]` with `map.setStyle()` to switch.
+ */
+export const DEFAULT_MAPLIBRE_STYLE = SATELLITE_WITH_LABELS_STYLE as unknown as StyleSpecification;
+
+export { MAPLIBRE_BASEMAP_STYLES, OSM_STREET_STYLE, SATELLITE_STYLE, SATELLITE_WITH_LABELS_STYLE };
 
 /** Status → marker color mapping used by the civic map surfaces. */
 export const STATUS_COLORS: Record<string, string> = {

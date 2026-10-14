@@ -1,10 +1,12 @@
 'use client';
 
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Map, Marker, NavigationControl, type StyleSpecification } from 'maplibre-gl';
+import { Map, Marker, NavigationControl, GeolocateControl, type StyleSpecification } from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { MapPin, Loader2, Search, Crosshair } from 'lucide-react';
-import { CARTO_STYLE } from '@/components/dashboard/mapConstants';
+import { DEFAULT_MAPLIBRE_STYLE, MAPLIBRE_BASEMAP_STYLES } from '@/components/dashboard/mapConstants';
+import type { MaplibreBasemapId } from '@/lib/map/basemap';
+import { MEERUT_CENTER_LNGLAT, MEERUT_DEFAULT_ZOOM } from '@/lib/map/basemap';
 import { cn } from '@/lib/utils';
 
 interface GeoResult {
@@ -52,6 +54,9 @@ export function LocationPicker({
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<Map | null>(null);
   const markerRef = useRef<Marker | null>(null);
+  // Default basemap: Satellite (with labels). Free Esri imagery + reference
+  // overlay; Satellite / Street (OSM) available from the switcher below.
+  const [basemap, setBasemap] = useState<MaplibreBasemapId>('satellite-labels');
 
   const applyPin = useCallback(
     (lat: number, lng: number, label?: string) => {
@@ -144,17 +149,32 @@ export function LocationPicker({
     return () => clearTimeout(t);
   }, [query, value.latitude, value.longitude]);
 
-  // Initialize the map once.
+  // Initialize the map once: Meerut (28.98, 77.70) at zoom 14 on satellite
+  // imagery with place/boundary labels. Clicking drops a pin and reverse-
+  // geocodes; the GeolocateControl covers "Use My Location" natively.
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
     const map = new Map({
       container: containerRef.current,
-      style: CARTO_STYLE as StyleSpecification,
-      center: value.latitude != null && value.longitude != null ? [value.longitude, value.latitude] : [77.5946, 12.9716],
-      zoom: value.hasPin ? 15 : 10,
+      style: DEFAULT_MAPLIBRE_STYLE as StyleSpecification,
+      center: value.latitude != null && value.longitude != null ? [value.longitude, value.latitude] : MEERUT_CENTER_LNGLAT,
+      zoom: value.hasPin ? 15 : MEERUT_DEFAULT_ZOOM,
       attributionControl: { compact: true },
     });
     map.addControl(new NavigationControl({ showCompass: false }), 'top-right');
+    const geo = new GeolocateControl({
+      positionOptions: { enableHighAccuracy: true, timeout: 10000 },
+      trackUserLocation: false,
+      showUserLocation: true,
+    });
+    map.addControl(geo, 'bottom-right');
+    geo.on('error', () => {
+      setError('Could not read your location (permission denied?). Search for an address or click the map instead.');
+    });
+    geo.on('geolocate', (e) => {
+      const c = (e as unknown as { coords: { latitude: number; longitude: number } }).coords;
+      if (c) applyPin(c.latitude, c.longitude);
+    });
     map.on('error', () => {
       setError(null);
     });
@@ -207,13 +227,31 @@ export function LocationPicker({
         setBusy(false);
         applyPin(pos.coords.latitude, pos.coords.longitude);
       },
-      () => {
+      (err) => {
         setBusy(false);
-        setError('Could not read your location. Search for an address or click the map instead.');
+        if (err.code === err.PERMISSION_DENIED) {
+          setError('Location permission denied. Enable location access, or search for an address / click the map instead.');
+        } else if (err.code === err.TIMEOUT) {
+          setError('Location request timed out. Try again, or click the map to drop a pin.');
+        } else {
+          setError('Could not read your location. Search for an address or click the map instead.');
+        }
       },
       { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 },
     );
   };
+
+  // Basemap switching: MapLibre markers survive setStyle (DOM overlays), so
+  // swapping the raster style is enough. Failures keep the current style.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    try {
+      map.setStyle(MAPLIBRE_BASEMAP_STYLES[basemap] as unknown as StyleSpecification);
+    } catch {
+      /* keep the current style when the switch fails (offline tiles, etc.) */
+    }
+  }, [basemap]);
 
   return (
     <div>
@@ -269,11 +307,28 @@ export function LocationPicker({
 
       {error ? <p className="mt-1.5 text-xs text-red-600 dark:text-red-400">{error}</p> : null}
 
-      {/* Map click-to-pin */}
+      {/* Map click-to-pin (satellite default; switcher is free, no key) */}
       <div ref={containerRef} className="relative mt-3 h-52 rounded-xl overflow-hidden border border-neutral-200 dark:border-dark-border">
         <p className="absolute top-2 left-2 z-10 text-[11px] px-2 py-1 rounded-full bg-neutral-900/80 text-white">
           Click the map to drop a pin
         </p>
+        <div className="absolute top-2 right-2 z-10 inline-flex items-center gap-1 rounded-full bg-white/95 border border-neutral-200 p-0.5 shadow-sm dark:bg-dark-bg/95 dark:border-dark-border">
+          {(['satellite-labels', 'satellite', 'street'] as const).map((id) => (
+            <button
+              key={id}
+              type="button"
+              onClick={() => setBasemap(id)}
+              aria-pressed={basemap === id}
+              className={`px-2 py-0.5 text-[11px] font-medium rounded-full transition-colors ${
+                basemap === id
+                  ? 'bg-brand-600 text-white'
+                  : 'text-neutral-600 hover:bg-neutral-100 dark:text-neutral-300 dark:hover:bg-neutral-800'
+              }`}
+            >
+              {id === 'satellite-labels' ? 'Satellite' : id === 'satellite' ? 'Satellite plain' : 'Street'}
+            </button>
+          ))}
+        </div>
       </div>
 
       <div className="mt-2 flex flex-wrap items-center gap-3">

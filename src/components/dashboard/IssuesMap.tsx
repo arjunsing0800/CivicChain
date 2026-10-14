@@ -23,7 +23,7 @@ export function IssuesMap({
   issues,
   className,
   defaultCenter = REGION_CITY.center,
-  defaultZoom = 10,
+  defaultZoom = 14,
 }: {
   issues: IssueListItem[];
   className?: string;

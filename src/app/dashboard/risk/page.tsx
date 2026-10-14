@@ -458,7 +458,7 @@ export default function RiskPage() {
                         riskLevel: w.riskLevel,
                         activeIncidents: w.activeIncidents,
                       }))}
-                      center={{ lat: 27.4924, lng: 78.0322 }}
+                      center={{ lat: 28.98, lng: 77.7 }}
                       className="w-full h-full"
                     />
                   </div>

@@ -39,7 +39,7 @@ const STATUS_COLOR: Record<string, string> = {
   rejected: 'bg-neutral-400',
 };
 
-const DEFAULT_CENTER = { lat: 27.4924, lng: 78.0322 };
+const DEFAULT_CENTER = { lat: 28.98, lng: 77.7 };
 
 interface LiveIssue {
   id: string;
@@ -74,7 +74,7 @@ export function CivicIntelligenceMapSection() {
   });
   const [selected, setSelected] = useState<LiveIssue | null>(null);
   const [view, setView] = useState(DEFAULT_CENTER);
-  const [zoom, setZoom] = useState(12);
+  const [zoom, setZoom] = useState(14);
 
   const located = data?.located ?? [];
   const center = data?.center ?? DEFAULT_CENTER;
@@ -89,7 +89,7 @@ export function CivicIntelligenceMapSection() {
   // Keep the map pinned to the (server-computed) data centroid until the user
   // focuses a specific issue.
   const effectiveView = selected ? view : center;
-  const effectiveZoom = selected ? zoom : 12;
+  const effectiveZoom = selected ? zoom : 14;
 
   const STATS = [
     { label: 'ACTIVE ISSUES', value: stats?.active ?? 0, color: 'text-amber-400' },

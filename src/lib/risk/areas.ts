@@ -124,10 +124,10 @@ function groupIssues(issues: RawIssue[]): GroupedArea[] {
     const withCoords = areaIssues.filter(i => i.latitude != null && i.longitude != null);
     const centroidLat = withCoords.length > 0
       ? withCoords.reduce((s, i) => s + (i.latitude ?? 0), 0) / withCoords.length
-      : 27.4924; // Default to Agra
+      : 28.98; // Default to Meerut
     const centroidLng = withCoords.length > 0
       ? withCoords.reduce((s, i) => s + (i.longitude ?? 0), 0) / withCoords.length
-      : 78.0322;
+      : 77.7;
 
     // Area name: ward name or human-readable grid label
     let areaName = areaId;

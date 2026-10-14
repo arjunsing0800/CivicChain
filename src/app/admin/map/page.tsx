@@ -64,18 +64,6 @@ export default function AdminMapPage() {
     [data],
   );
 
-  const scenePoints = useMemo(
-    () =>
-      (data?.points ?? []).map((p) => ({
-        id: p.id,
-        lat: p.latitude,
-        lng: p.longitude,
-        attentionLevel: p.detail.attentionLevel,
-        severity: p.severity,
-      })),
-    [data],
-  );
-
   return (
     <div className="space-y-6">
       <PageHeader
@@ -96,10 +84,6 @@ export default function AdminMapPage() {
           mapPoints={mapPoints}
           selectedId={selectedId}
           onSelectIssue={setSelectedId}
-          mapContext={{
-            points: scenePoints,
-            center: data.center,
-          }}
         />
       )}
     </div>

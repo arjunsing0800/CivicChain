@@ -1,9 +1,11 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { Map, Marker, Popup, NavigationControl } from 'maplibre-gl';
+import { Map, Marker, Popup, NavigationControl, GeolocateControl, type StyleSpecification } from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
-import { CARTO_STYLE } from '@/components/dashboard/mapConstants';
+import { DEFAULT_MAPLIBRE_STYLE, MAPLIBRE_BASEMAP_STYLES } from '@/components/dashboard/mapConstants';
+import type { MaplibreBasemapId } from '@/lib/map/basemap';
+import { MEERUT_CENTER_LNGLAT, MEERUT_DEFAULT_ZOOM } from '@/lib/map/basemap';
 
 const SLA_COLORS: Record<string, string> = {
   BREACHED: '#ef4444',
@@ -44,27 +46,37 @@ export function CommandCenterMap({
   const mapRef = useRef<Map | null>(null);
   const markersRef = useRef<Marker[]>([]);
   const [offline, setOffline] = useState(false);
+  const [basemap, setBasemap] = useState<MaplibreBasemapId>('satellite-labels');
 
+  // Default view: Meerut (28.98, 77.70) at zoom 14 on satellite-with-labels.
   const center: [number, number] =
     markers.length > 0
       ? [
           markers.reduce((s, m) => s + m.longitude, 0) / markers.length,
           markers.reduce((s, m) => s + m.latitude, 0) / markers.length,
         ]
-      : [78.0322, 27.4924];
+      : MEERUT_CENTER_LNGLAT;
 
-  const zoom = markers.length === 1 ? 15 : markers.length > 0 ? 11 : 9;
+  const zoom = markers.length === 1 ? 15 : markers.length > 0 ? 11 : MEERUT_DEFAULT_ZOOM;
 
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
     const map = new Map({
       container: containerRef.current,
-      style: CARTO_STYLE,
+      style: DEFAULT_MAPLIBRE_STYLE as StyleSpecification,
       center,
       zoom,
       attributionControl: { compact: true },
     });
     map.addControl(new NavigationControl({ showCompass: false }), 'top-right');
+    // Built-in locate-me (handles denied permission with an error event).
+    const geo = new GeolocateControl({
+      positionOptions: { enableHighAccuracy: true, timeout: 10000 },
+      trackUserLocation: false,
+      showUserLocation: true,
+    });
+    map.addControl(geo, 'bottom-right');
+    geo.on('error', () => setOffline(false));
     map.on('error', () => setOffline(true));
     mapRef.current = map;
     return () => {
@@ -74,6 +86,17 @@ export function CommandCenterMap({
       mapRef.current = null;
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Basemap switching (satellite-with-labels default; Satellite / Street free).
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    try {
+      map.setStyle(MAPLIBRE_BASEMAP_STYLES[basemap] as unknown as StyleSpecification);
+    } catch {
+      /* keep current style on failure */
+    }
+  }, [basemap]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -108,6 +131,24 @@ export function CommandCenterMap({
   return (
     <div className={`relative overflow-hidden rounded-xl border border-neutral-200 dark:border-dark-border bg-neutral-100 dark:bg-dark-bg ${className ?? ''}`}>
       <div ref={containerRef} className="absolute inset-0" />
+      {/* Free basemap switcher: Satellite (with labels) default */}
+      <div className="absolute top-3 left-3 z-10 inline-flex items-center gap-1 rounded-full bg-white/95 border border-neutral-200 p-1 shadow-sm dark:bg-dark-bg/95 dark:border-dark-border">
+        {(['satellite-labels', 'satellite', 'street'] as const).map((id) => (
+          <button
+            key={id}
+            type="button"
+            onClick={() => setBasemap(id)}
+            aria-pressed={basemap === id}
+            className={`px-2.5 py-1 text-[11px] font-medium rounded-full transition-colors ${
+              basemap === id
+                ? 'bg-brand-600 text-white'
+                : 'text-neutral-600 hover:bg-neutral-100 dark:text-neutral-300 dark:hover:bg-neutral-800'
+            }`}
+          >
+            {id === 'satellite-labels' ? 'Satellite' : id === 'satellite' ? 'Satellite plain' : 'Street'}
+          </button>
+        ))}
+      </div>
       {offline && (
         <div className="absolute inset-x-4 bottom-4 p-3 rounded-lg bg-white/95 dark:bg-dark-bg/95 border border-neutral-200 dark:border-dark-border text-xs text-neutral-700 dark:text-neutral-200 shadow-sm">
           Map tiles could not be loaded (offline?). Markers are still laid out by coordinate.

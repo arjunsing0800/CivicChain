@@ -1,26 +1,12 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { Map, Marker, Popup, NavigationControl, type StyleSpecification } from 'maplibre-gl';
+import { Map, Marker, Popup, NavigationControl, GeolocateControl, type StyleSpecification } from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import type { RiskHotspot } from '@/lib/risk/types';
-
-const CARTO_STYLE: StyleSpecification = {
-  version: 8,
-  sources: {
-    'carto-voyager': {
-      type: 'raster',
-      tiles: [
-        'https://a.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',
-        'https://b.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',
-        'https://c.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',
-      ],
-      tileSize: 256,
-      attribution: '© OpenStreetMap contributors © CARTO',
-    },
-  },
-  layers: [{ id: 'carto-voyager', type: 'raster', source: 'carto-voyager' }],
-};
+import { DEFAULT_MAPLIBRE_STYLE, MAPLIBRE_BASEMAP_STYLES } from '@/components/dashboard/mapConstants';
+import type { MaplibreBasemapId } from '@/lib/map/basemap';
+import { MEERUT_CENTER_LNGLAT, MEERUT_DEFAULT_ZOOM } from '@/lib/map/basemap';
 
 /**
  * Risk Hotspot Map — MapLibre map with risk-level gradient markers.
@@ -56,7 +42,9 @@ export function RiskHeatmap({ hotspots, center, zoom }: RiskHeatmapProps) {
   const mapRef = useRef<Map | null>(null);
   const markersRef = useRef<Marker[]>([]);
   const [offline, setOffline] = useState(false);
+  const [basemap, setBasemap] = useState<MaplibreBasemapId>('satellite-labels');
 
+  // Default view: Meerut (28.98, 77.70) at zoom 14 on satellite-with-labels.
   const mapCenter: [number, number] =
     center ??
     (hotspots.length > 0
@@ -64,19 +52,25 @@ export function RiskHeatmap({ hotspots, center, zoom }: RiskHeatmapProps) {
           hotspots.reduce((s, h) => s + h.longitude, 0) / hotspots.length,
           hotspots.reduce((s, h) => s + h.latitude, 0) / hotspots.length,
         ]
-      : [78.0322, 27.4924]);
-  const mapZoom = zoom ?? (hotspots.length === 1 ? 15 : hotspots.length > 0 ? 11 : 9);
+      : MEERUT_CENTER_LNGLAT);
+  const mapZoom = zoom ?? (hotspots.length === 1 ? 15 : hotspots.length > 0 ? 11 : MEERUT_DEFAULT_ZOOM);
 
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
     const map = new Map({
       container: containerRef.current,
-      style: CARTO_STYLE as StyleSpecification,
+      style: DEFAULT_MAPLIBRE_STYLE as StyleSpecification,
       center: mapCenter,
       zoom: mapZoom,
       attributionControl: { compact: true },
     });
     map.addControl(new NavigationControl({ showCompass: false }), 'top-right');
+    const geo = new GeolocateControl({
+      positionOptions: { enableHighAccuracy: true, timeout: 10000 },
+      trackUserLocation: false,
+      showUserLocation: true,
+    });
+    map.addControl(geo, 'bottom-right');
     map.on('error', () => setOffline(true));
     mapRef.current = map;
     return () => {
@@ -87,6 +81,17 @@ export function RiskHeatmap({ hotspots, center, zoom }: RiskHeatmapProps) {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hotspots]);
+
+  // Basemap switching; markers are DOM overlays and survive setStyle.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    try {
+      map.setStyle(MAPLIBRE_BASEMAP_STYLES[basemap] as unknown as StyleSpecification);
+    } catch {
+      /* keep current style on failure */
+    }
+  }, [basemap]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -139,6 +144,24 @@ export function RiskHeatmap({ hotspots, center, zoom }: RiskHeatmapProps) {
   return (
     <div className="relative w-full h-full min-h-[280px]" role="region" aria-label="Risk hotspots map">
       <div ref={containerRef} className="absolute inset-0" />
+      {/* Free basemap switcher: Satellite (with labels) default */}
+      <div className="absolute top-3 left-3 z-10 inline-flex items-center gap-1 rounded-full bg-white/95 border border-neutral-200 p-1 shadow-sm dark:bg-dark-bg/95 dark:border-dark-border">
+        {(['satellite-labels', 'satellite', 'street'] as const).map((id) => (
+          <button
+            key={id}
+            type="button"
+            onClick={() => setBasemap(id)}
+            aria-pressed={basemap === id}
+            className={`px-2.5 py-1 text-[11px] font-medium rounded-full transition-colors ${
+              basemap === id
+                ? 'bg-brand-600 text-white'
+                : 'text-neutral-600 hover:bg-neutral-100 dark:text-neutral-300 dark:hover:bg-neutral-800'
+            }`}
+          >
+            {id === 'satellite-labels' ? 'Satellite' : id === 'satellite' ? 'Satellite plain' : 'Street'}
+          </button>
+        ))}
+      </div>
       {offline && (
         <div className="absolute inset-x-4 bottom-4 p-3 rounded-lg bg-white/95 dark:bg-dark-bg/95 border border-neutral-200 dark:border-dark-border text-xs text-neutral-700 dark:text-neutral-200 shadow-sm">
           Map tiles could not be loaded (offline?). Risk markers are still laid out by coordinate.
