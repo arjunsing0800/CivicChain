@@ -39,11 +39,34 @@ export function LoginForm({ mode = 'login' }: { mode?: 'login' | 'register' }) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const callbackUrl = searchParams.get('callbackUrl') || '/dashboard';
+  // Auth.js OAuth failures redirect to /login?error=... — surface them instead
+  // of silently showing the form again (the reported "Google sends me back
+  // where I start" loop).
+  const authError = searchParams.get('error');
+  const AUTH_ERROR_MESSAGES: Record<string, string> = {
+    Configuration:
+      'Sign-in is misconfigured (missing secret or OAuth credentials). Please contact support.',
+    AccessDenied: 'Access denied for this account. Please contact support.',
+    Verification: 'This sign-in link is expired or already used. Request a new one.',
+    OAuthSignin: 'Could not start Google sign-in. Please try again.',
+    OAuthCallback:
+      'Google sign-in failed during callback (often: missing AUTH_SECRET, unmigrated database, or redirect-URI mismatch). Please try again.',
+    OAuthCreateAccount: 'Could not create your account with Google. Please try again.',
+    EmailCreateAccount: 'Could not create your account. Please try again.',
+    Callback: 'Sign-in callback failed. Please try again.',
+    OAuthAccountNotLinked:
+      'This email already exists with another sign-in method. Sign in with the original method first.',
+    EmailSignin: 'Could not send the magic link. Please try again.',
+    CredentialsSignin: 'Sign-in failed. Please try again.',
+    SessionRequired: 'You must be signed in to view that page.',
+  };
   const [email, setEmail] = useState('');
   const [role, setRole] = useState<string>('CITIZEN');
   const [sent, setSent] = useState(false);
   const [devLink, setDevLink] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(
+    authError ? (AUTH_ERROR_MESSAGES[authError] ?? `Sign-in failed (${authError}). Please try again.`) : null,
+  );
   const [loading, setLoading] = useState(false);
   const reduce = useReducedMotion();
 

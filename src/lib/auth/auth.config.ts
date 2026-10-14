@@ -35,6 +35,18 @@ export const authConfig = {
     },
   },
   callbacks: {
+    async redirect({ url, baseUrl }) {
+      // Allow relative post-login URLs (e.g. /dashboard) and any same-origin
+      // URL. Without this, Auth.js can bounce back to /login after Google
+      // sign-in when callbackUrl is forwarded through the flow.
+      if (url.startsWith('/')) return `${baseUrl}${url}`;
+      try {
+        if (new URL(url).origin === baseUrl) return url;
+      } catch {
+        // fall through to baseUrl
+      }
+      return baseUrl;
+    },
     jwt({ token, user }) {
       if (user) {
         token.id = user.id as string;

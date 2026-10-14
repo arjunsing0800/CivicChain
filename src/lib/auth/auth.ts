@@ -44,6 +44,10 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     GoogleProvider({
       clientId: process.env.GOOGLE_CLIENT_ID!,
       clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
+      // Same Gmail may already exist via magic-link signup. Without this,
+      // Auth.js throws OAuthAccountNotLinked and redirects to /login?error=...
+      // which looks like a "login loop" (Google -> back to start).
+      allowDangerousEmailAccountLinking: true,
     }),
     EmailProvider({
       // Required by the provider constructor even though delivery is fully
